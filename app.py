@@ -1162,7 +1162,7 @@ if "y_label" not in st.session_state:
 if "filter_method" not in st.session_state:
     st.session_state.filter_method = "无筛选"
 if "line_width" not in st.session_state:
-    st.session_state.line_width = 4
+    st.session_state.line_width = 2
 if "color_mode" not in st.session_state:
     st.session_state.color_mode = "自动分配"
 if "tester_name" not in st.session_state:
@@ -1537,7 +1537,7 @@ with st.container(border=True):
     st.markdown("**样式**")
     sr = st.columns([1, 1, 2])
     with sr[2]:
-        st.slider("点大小", 1, 10, value=4, step=1, key="line_width")
+        st.slider("点大小", 1, 10, value=2, step=1, key="line_width")
     with sr[0]:
         st.radio("颜色模式", ["自动分配", "自定义每个测试组"], key="color_mode", horizontal=True)
 
@@ -1556,7 +1556,7 @@ x_var = st.session_state.x_var
 y_var = st.session_state.y_var
 x_label = st.session_state.x_label or x_var
 y_label = st.session_state.y_label or y_var
-line_width = st.session_state.line_width
+line_width = st.session_state.get("line_width", 2)
 color_mode = st.session_state.color_mode
 
 # 对选中的测试组按原始顺序排序，保证图例顺序一致
@@ -1590,7 +1590,7 @@ x_var = st.session_state.x_var
 y_var = st.session_state.y_var
 x_label = st.session_state.x_label
 y_label = st.session_state.y_label
-line_width = st.session_state.line_width
+line_width = st.session_state.get("line_width", 2)
 color_mode = st.session_state.color_mode
 
 # Excel 导出
