@@ -15,6 +15,13 @@ import os
 import json
 import plotly.graph_objects as go
 import plotly.io as pio
+import kaleido
+
+# 确保 Chrome 可用（Streamlit Cloud 上 kaleido 需要）
+try:
+    kaleido.get_chrome_sync()
+except Exception:
+    pass
 
 # ==================== 全局配置 ====================
 st.set_page_config(
@@ -566,8 +573,8 @@ def generate_word_report_bytes(selected_groups, x_var, y_var, x_label, y_label,
     """
     custom_colors = dict(custom_colors_tuple)
     chart_path = None
+    has_chart = False
     try:
-        # 生成图表图片
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
             chart_path = tmp.name
             fig = plot_plotly_chart(
@@ -577,8 +584,11 @@ def generate_word_report_bytes(selected_groups, x_var, y_var, x_label, y_label,
                 edited_data
             )
             fig.write_image(chart_path, width=1400, height=500, scale=2)
+            has_chart = True
+    except Exception:
+        has_chart = False
 
-        doc = Document()
+    doc = Document()
         section = doc.sections[0]
         section.page_width = Cm(29.7)
         section.page_height = Cm(21.0)
@@ -762,16 +772,23 @@ def generate_word_report_bytes(selected_groups, x_var, y_var, x_label, y_label,
         run.bold = True
         run.font.size = Pt(12)
         run.font.name = 'Microsoft YaHei'
-        p = doc.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = p.add_run()
-        run.add_picture(chart_path, width=Cm(24))
-        doc.add_paragraph()
-        p = doc.add_paragraph()
-        p.paragraph_format.space_before = Pt(2)
-        run = p.add_run(f"图表说明：X轴为{x_label}，Y轴为{y_label}，数据筛选方式：无筛选")
-        run.font.size = Pt(9)
-        run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+        if has_chart:
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.add_run()
+            run.add_picture(chart_path, width=Cm(24))
+            doc.add_paragraph()
+            p = doc.add_paragraph()
+            p.paragraph_format.space_before = Pt(2)
+            run = p.add_run(f"图表说明：X轴为{x_label}，Y轴为{y_label}，数据筛选方式：无筛选")
+            run.font.size = Pt(9)
+            run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+        else:
+            p = doc.add_paragraph()
+            run = p.add_run("（图表生成失败，请确认 Chrome 已安装）")
+            run.font.size = Pt(9)
+            run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+            run.italic = True
 
         word_buffer = io.BytesIO()
         doc.save(word_buffer)
