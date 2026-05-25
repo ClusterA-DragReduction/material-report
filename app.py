@@ -18,6 +18,18 @@ import plotly.io as pio
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+
+# ==================== 字体设置函数（参考 app_0.py） ====================
+def setup_matplotlib_font():
+    import platform
+    if platform.system() == 'Windows':
+        plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei']
+    elif platform.system() == 'Linux':
+        plt.rcParams['font.sans-serif'] = ['WenQuanYi Micro Hei', 'Noto Sans CJK SC']
+    else:
+        plt.rcParams['font.sans-serif'] = ['STHeiti', 'Arial Unicode MS']
+    plt.rcParams['axes.unicode_minus'] = False
 
 # ==================== 全局配置 ====================
 st.set_page_config(
@@ -558,6 +570,45 @@ def _set_table_col_widths(table, widths_cm):
             if i < len(row.cells):
                 row.cells[i].width = Cm(width)
 
+# ==================== 统一 Matplotlib 绘图函数（参考 app_0.py） ====================
+def plot_matplotlib_chart(selected_groups, edited_data, x_var, y_var,
+                          x_label, y_label, line_width, custom_colors):
+    """
+    使用 matplotlib 绘制曲线图，返回 figure 对象。
+    供 Word 报告生成使用，与 app_0.py 的 plot_custom_chart 结构一致。
+    """
+    setup_matplotlib_font()
+    fig, ax = plt.subplots(figsize=(12, 5))
+    palette = ['#1a237e', '#ef5350', '#2e7d32', '#ff8f00', '#6a1b9a',
+               '#00838f', '#d81b60', '#3e2723', '#558b2f', '#01579b']
+    plotted = 0
+    for idx, tid in enumerate(selected_groups):
+        if tid not in edited_data:
+            continue
+        df = edited_data[tid]
+        if x_var not in df.columns or y_var not in df.columns:
+            continue
+        xv = df[x_var].values
+        yv = df[y_var].values
+        if len(xv) == 0:
+            continue
+        color = custom_colors.get(tid, palette[idx % len(palette)])
+        ax.plot(xv, yv, color=color, linewidth=max(0.5, line_width * 0.5),
+                marker='o', markersize=line_width, label=tid)
+        plotted += 1
+    if plotted == 0:
+        ax.text(0.5, 0.5, '无有效数据可绘图', transform=ax.transAxes,
+                ha='center', va='center', fontsize=14, color='gray')
+    ax.set_xlabel(x_label, fontsize=11)
+    ax.set_ylabel(y_label, fontsize=11)
+    ax.set_title(f"{y_label} - {x_label} 曲线", fontsize=13, color='#1a237e')
+    ax.grid(True, alpha=0.3)
+    if plotted > 0:
+        ax.legend(fontsize=9)
+    fig.tight_layout()
+    return fig
+
+
 def generate_word_report_bytes(selected_groups, x_var, y_var, x_label, y_label,
                                line_width, color_mode, custom_colors_tuple,
                                company_name, report_title, batch_no, timestamp,
@@ -568,244 +619,219 @@ def generate_word_report_bytes(selected_groups, x_var, y_var, x_label, y_label,
     所有数据通过参数传入，不依赖 st.session_state。
     """
     custom_colors = dict(custom_colors_tuple)
-    chart_path = None
-    palette = ['#1a237e', '#ef5350', '#2e7d32', '#ff8f00', '#6a1b9a',
-               '#00838f', '#d81b60', '#3e2723', '#558b2f', '#01579b']
+    chart_buffer = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-            chart_path = tmp.name
-            plt.figure(figsize=(12, 5))
-            for idx, tid in enumerate(selected_groups):
-                df = edited_data[tid]
-                if x_var not in df.columns or y_var not in df.columns:
-                    continue
-                xv = df[x_var].values
-                yv = df[y_var].values
-                if len(xv) == 0:
-                    continue
-                color = custom_colors.get(tid, palette[idx % len(palette)])
-                plt.plot(xv, yv, color=color, linewidth=max(0.5, line_width * 0.5),
-                         marker='o', markersize=line_width, label=tid)
-            plt.xlabel(x_label, fontsize=11)
-            plt.ylabel(y_label, fontsize=11)
-            plt.title(f"{y_label} - {x_label} 曲线", fontsize=13, color='#1a237e')
-            plt.grid(True, alpha=0.3)
-            plt.legend(fontsize=9)
-            plt.tight_layout()
-            plt.savefig(chart_path, dpi=150, facecolor='white')
-            plt.close()
+        fig = plot_matplotlib_chart(
+            selected_groups, edited_data, x_var, y_var,
+            x_label, y_label, line_width, custom_colors
+        )
+        chart_buffer = io.BytesIO()
+        fig.savefig(chart_buffer, format='png', dpi=150, facecolor='white')
+        plt.close(fig)
     except Exception:
-        if chart_path and os.path.exists(chart_path):
-            try:
-                os.unlink(chart_path)
-            except Exception:
-                pass
-        chart_path = None
+        chart_buffer = None
 
-    try:
-        doc = Document()
-        section = doc.sections[0]
-        section.page_width = Cm(29.7)
-        section.page_height = Cm(21.0)
-        section.left_margin = Cm(2.0)
-        section.right_margin = Cm(1.5)
-        section.top_margin = Cm(1.5)
-        section.bottom_margin = Cm(1.5)
+    doc = Document()
+    section = doc.sections[0]
+    section.page_width = Cm(29.7)
+    section.page_height = Cm(21.0)
+    section.left_margin = Cm(2.0)
+    section.right_margin = Cm(1.5)
+    section.top_margin = Cm(1.5)
+    section.bottom_margin = Cm(1.5)
 
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_after = Pt(2)
+    run = p.add_run(company_name)
+    run.bold = True
+    run.font.size = Pt(16)
+    run.font.name = 'Microsoft YaHei'
+
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(0)
+    p.paragraph_format.space_after = Pt(6)
+    run = p.add_run(f"{company_name}{report_title}")
+    run.bold = True
+    run.font.size = Pt(18)
+    run.font.name = 'Microsoft YaHei'
+    run.font.color.rgb = RGBColor(0x1a, 0x23, 0x7e)
+
+    header_table = doc.add_table(rows=5, cols=2)
+    header_table.style = 'Table Grid'
+    header_data = [("测试批号:", batch_no), ("测试人员:", tester_name),
+                   ("客户名称:", client_name), ("测试标准:", test_standard),
+                   ("测试日期:", timestamp)]
+    for i, (label, val) in enumerate(header_data):
+        for j, txt in enumerate([label, val]):
+            c = header_table.rows[i].cells[j]
+            c.text = ""
+            rr = c.paragraphs[0].add_run(txt)
+            rr.font.size = Pt(11)
+            rr.font.name = 'Microsoft YaHei'
+            if j == 0:
+                rr.bold = True
+                _set_cell_shading(c, "e8eaf6")
+    _set_table_col_widths(header_table, [3.0, 23.2])
+
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    run = p.add_run("测试结果：")
+    run.bold = True
+    run.font.size = Pt(12)
+    run.font.name = 'Microsoft YaHei'
+
+    USABLE_WIDTH = 26.2
+    if test_type == "拉伸性能测试":
+        headers = ["测试编号", "最大荷重(N)", "最大荷重位移(mm)", "最大荷重伸长率(%)",
+                   "抗拉强度(MPa)", "弹性模量(Ei)(MPa)", "屈服强度(MPa)", "屈服伸长率(%)",
+                   "断裂强度(MPa)", "断裂伸长率(%)", "标距(mm)", "面积(mm²)"]
+        col_widths = [3.2] + [2.0]*9 + [1.8, 1.8]
+        col_widths = [w * USABLE_WIDTH / sum(col_widths) for w in col_widths]
+
+        num_data_rows = len(all_props)
+        total_rows = 1 + num_data_rows + 3
+        table = doc.add_table(rows=total_rows, cols=len(headers))
+        table.style = 'Table Grid'
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+        for i, header in enumerate(headers):
+            cell = table.rows[0].cells[i]
+            cell.text = header
+            _set_cell_shading(cell, "1a237e")
+            _set_cell_font(cell, size=Pt(9), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+            for paragraph in cell.paragraphs:
+                for run in paragraph.runs:
+                    run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        _set_table_col_widths(table, col_widths)
+
+        for idx, (props, test_id) in enumerate(zip(all_props, test_ids)):
+            row = table.rows[1 + idx]
+            values = [
+                test_id,
+                f"{props['max_force_N']:.3f}", f"{props['max_disp']:.3f}",
+                f"{props['max_strain_pct']:.3f}", f"{props['tensile_strength']:.3f}",
+                f"{props['E_modulus']:.3f}", f"{props['yield_stress']:.3f}",
+                f"{props['yield_strain']:.3f}", f"{props['break_stress']:.3f}",
+                f"{props['break_strain']:.3f}", f"{props['gauge_length']:.3f}",
+                f"{props['area']:.3f}",
+            ]
+            for j, val in enumerate(values):
+                row.cells[j].text = val
+                _set_cell_font(row.cells[j], size=Pt(9), bold=False, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+            if idx % 2 == 1:
+                for j in range(len(headers)):
+                    _set_cell_shading(row.cells[j], "f5f5ff")
+
+        stat_rows = [("最大值 Max", np.max), ("最小值 Min", np.min), ("平均值 X-bar", np.mean)]
+        stat_fields = ["max_force_N", "max_disp", "max_strain_pct",
+                       "tensile_strength", "E_modulus", "yield_stress",
+                       "yield_strain", "break_stress", "break_strain"]
+        stat_colors = ["e3f2fd", "fce4ec", "e8f5e9"]
+        for s_idx, (label, func) in enumerate(stat_rows):
+            row = table.rows[1 + num_data_rows + s_idx]
+            row.cells[0].text = label
+            _set_cell_shading(row.cells[0], stat_colors[s_idx])
+            _set_cell_font(row.cells[0], size=Pt(9), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+            for f_idx, field in enumerate(stat_fields):
+                vals = [p[field] for p in all_props]
+                stat_val = func(vals)
+                row.cells[1 + f_idx].text = f"{stat_val:.3f}"
+                _set_cell_shading(row.cells[1 + f_idx], stat_colors[s_idx])
+                _set_cell_font(row.cells[1 + f_idx], size=Pt(9), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+            gauge_vals = [p["gauge_length"] for p in all_props]
+            row.cells[len(headers) - 2].text = f"{func(gauge_vals):.3f}"
+            _set_cell_shading(row.cells[len(headers) - 2], stat_colors[s_idx])
+            _set_cell_font(row.cells[len(headers) - 2], size=Pt(9), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+            area_vals = [p["area"] for p in all_props]
+            row.cells[len(headers) - 1].text = f"{func(area_vals):.3f}"
+            _set_cell_shading(row.cells[len(headers) - 1], stat_colors[s_idx])
+            _set_cell_font(row.cells[len(headers) - 1], size=Pt(9), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+
+    else:
+        # 剥离测试
+        headers = ["测试编号", "180°剥离平均强度(gf/cm)", "宽度(cm)", "单区间最大荷重(N)",
+                   "单区间最小荷重(N)", "单区间荷重平均值(N)"]
+        col_widths = [4.0, 5.0, 2.5, 4.5, 4.5, 4.5]
+        col_widths = [w * USABLE_WIDTH / sum(col_widths) for w in col_widths]
+
+        num_data_rows = len(all_props)
+        total_rows = 1 + num_data_rows + 3
+        table = doc.add_table(rows=total_rows, cols=len(headers))
+        table.style = 'Table Grid'
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+        for i, header in enumerate(headers):
+            cell = table.rows[0].cells[i]
+            cell.text = header
+            _set_cell_shading(cell, "1a237e")
+            _set_cell_font(cell, size=Pt(10), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+            for paragraph in cell.paragraphs:
+                for run in paragraph.runs:
+                    run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        _set_table_col_widths(table, col_widths)
+
+        for idx, (props, test_id) in enumerate(zip(all_props, test_ids)):
+            width_cm = raw_group_data[test_id].get("width", 0) / 10.0
+            row = table.rows[1 + idx]
+            values = [
+                test_id,
+                f"{props['peel_strength_gf_cm']:.3f}",
+                f"{width_cm:.3f}",
+                f"{props['max_force_N']:.3f}",
+                f"{props['min_force_N']:.3f}",
+                f"{props['avg_force_N']:.3f}"
+            ]
+            for j, val in enumerate(values):
+                row.cells[j].text = val
+                _set_cell_font(row.cells[j], size=Pt(10), bold=False, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+            if idx % 2 == 1:
+                for j in range(len(headers)):
+                    _set_cell_shading(row.cells[j], "f5f5ff")
+
+        stat_rows = [("最大值 Max", np.max), ("最小值 Min", np.min), ("平均值 X-bar", np.mean)]
+        stat_fields = ["peel_strength_gf_cm", "max_force_N", "min_force_N", "avg_force_N"]
+        stat_colors = ["e3f2fd", "fce4ec", "e8f5e9"]
+        for s_idx, (label, func) in enumerate(stat_rows):
+            row = table.rows[1 + num_data_rows + s_idx]
+            row.cells[0].text = label
+            _set_cell_shading(row.cells[0], stat_colors[s_idx])
+            _set_cell_font(row.cells[0], size=Pt(10), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+            for f_idx, field in enumerate(stat_fields):
+                vals = [p[field] for p in all_props]
+                stat_val = func(vals)
+                row.cells[1 + f_idx].text = f"{stat_val:.3f}"
+                _set_cell_shading(row.cells[1 + f_idx], stat_colors[s_idx])
+                _set_cell_font(row.cells[1 + f_idx], size=Pt(10), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+            width_vals = [raw_group_data[t].get("width", 0) / 10.0 for t in test_ids]
+            row.cells[len(headers) - 2].text = f"{func(width_vals):.3f}"
+            _set_cell_shading(row.cells[len(headers) - 2], stat_colors[s_idx])
+            _set_cell_font(row.cells[len(headers) - 2], size=Pt(10), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    run = p.add_run("测试曲线：")
+    run.bold = True
+    run.font.size = Pt(12)
+    run.font.name = 'Microsoft YaHei'
+    if chart_buffer is not None:
+        chart_buffer.seek(0)
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p.paragraph_format.space_after = Pt(2)
-        run = p.add_run(company_name)
-        run.bold = True
-        run.font.size = Pt(16)
-        run.font.name = 'Microsoft YaHei'
-
-        p = doc.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p.paragraph_format.space_before = Pt(0)
-        p.paragraph_format.space_after = Pt(6)
-        run = p.add_run(f"{company_name}{report_title}")
-        run.bold = True
-        run.font.size = Pt(18)
-        run.font.name = 'Microsoft YaHei'
-        run.font.color.rgb = RGBColor(0x1a, 0x23, 0x7e)
-
-        header_table = doc.add_table(rows=5, cols=2)
-        header_table.style = 'Table Grid'
-        header_data = [("测试批号:", batch_no), ("测试人员:", tester_name),
-                       ("客户名称:", client_name), ("测试标准:", test_standard),
-                       ("测试日期:", timestamp)]
-        for i, (label, val) in enumerate(header_data):
-            for j, txt in enumerate([label, val]):
-                c = header_table.rows[i].cells[j]
-                c.text = ""
-                rr = c.paragraphs[0].add_run(txt)
-                rr.font.size = Pt(11)
-                rr.font.name = 'Microsoft YaHei'
-                if j == 0:
-                    rr.bold = True
-                    _set_cell_shading(c, "e8eaf6")
-        _set_table_col_widths(header_table, [3.0, 23.2])
-
+        run = p.add_run()
+        run.add_picture(chart_buffer, width=Cm(24))
         doc.add_paragraph()
         p = doc.add_paragraph()
-        run = p.add_run("测试结果：")
-        run.bold = True
-        run.font.size = Pt(12)
-        run.font.name = 'Microsoft YaHei'
+        p.paragraph_format.space_before = Pt(2)
+        run = p.add_run(f"图表说明：X轴为{x_label}，Y轴为{y_label}")
+        run.font.size = Pt(9)
+        run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
 
-        USABLE_WIDTH = 26.2
-        if test_type == "拉伸性能测试":
-            headers = ["测试编号", "最大荷重(N)", "最大荷重位移(mm)", "最大荷重伸长率(%)",
-                       "抗拉强度(MPa)", "弹性模量(Ei)(MPa)", "屈服强度(MPa)", "屈服伸长率(%)",
-                       "断裂强度(MPa)", "断裂伸长率(%)", "标距(mm)", "面积(mm²)"]
-            col_widths = [3.2] + [2.0]*9 + [1.8, 1.8]
-            col_widths = [w * USABLE_WIDTH / sum(col_widths) for w in col_widths]
-
-            num_data_rows = len(all_props)
-            total_rows = 1 + num_data_rows + 3
-            table = doc.add_table(rows=total_rows, cols=len(headers))
-            table.style = 'Table Grid'
-            table.alignment = WD_TABLE_ALIGNMENT.CENTER
-
-            for i, header in enumerate(headers):
-                cell = table.rows[0].cells[i]
-                cell.text = header
-                _set_cell_shading(cell, "1a237e")
-                _set_cell_font(cell, size=Pt(9), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
-                for paragraph in cell.paragraphs:
-                    for run in paragraph.runs:
-                        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-            _set_table_col_widths(table, col_widths)
-
-            for idx, (props, test_id) in enumerate(zip(all_props, test_ids)):
-                row = table.rows[1 + idx]
-                values = [
-                    test_id,
-                    f"{props['max_force_N']:.3f}", f"{props['max_disp']:.3f}",
-                    f"{props['max_strain_pct']:.3f}", f"{props['tensile_strength']:.3f}",
-                    f"{props['E_modulus']:.3f}", f"{props['yield_stress']:.3f}",
-                    f"{props['yield_strain']:.3f}", f"{props['break_stress']:.3f}",
-                    f"{props['break_strain']:.3f}", f"{props['gauge_length']:.3f}",
-                    f"{props['area']:.3f}",
-                ]
-                for j, val in enumerate(values):
-                    row.cells[j].text = val
-                    _set_cell_font(row.cells[j], size=Pt(9), bold=False, alignment=WD_ALIGN_PARAGRAPH.CENTER)
-                if idx % 2 == 1:
-                    for j in range(len(headers)):
-                        _set_cell_shading(row.cells[j], "f5f5ff")
-
-            stat_rows = [("最大值 Max", np.max), ("最小值 Min", np.min), ("平均值 X-bar", np.mean)]
-            stat_fields = ["max_force_N", "max_disp", "max_strain_pct",
-                           "tensile_strength", "E_modulus", "yield_stress",
-                           "yield_strain", "break_stress", "break_strain"]
-            stat_colors = ["e3f2fd", "fce4ec", "e8f5e9"]
-            for s_idx, (label, func) in enumerate(stat_rows):
-                row = table.rows[1 + num_data_rows + s_idx]
-                row.cells[0].text = label
-                _set_cell_shading(row.cells[0], stat_colors[s_idx])
-                _set_cell_font(row.cells[0], size=Pt(9), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
-                for f_idx, field in enumerate(stat_fields):
-                    vals = [p[field] for p in all_props]
-                    stat_val = func(vals)
-                    row.cells[1 + f_idx].text = f"{stat_val:.3f}"
-                    _set_cell_shading(row.cells[1 + f_idx], stat_colors[s_idx])
-                    _set_cell_font(row.cells[1 + f_idx], size=Pt(9), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
-                gauge_vals = [p["gauge_length"] for p in all_props]
-                row.cells[len(headers) - 2].text = f"{func(gauge_vals):.3f}"
-                _set_cell_shading(row.cells[len(headers) - 2], stat_colors[s_idx])
-                _set_cell_font(row.cells[len(headers) - 2], size=Pt(9), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
-                area_vals = [p["area"] for p in all_props]
-                row.cells[len(headers) - 1].text = f"{func(area_vals):.3f}"
-                _set_cell_shading(row.cells[len(headers) - 1], stat_colors[s_idx])
-                _set_cell_font(row.cells[len(headers) - 1], size=Pt(9), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
-
-        else:
-            # 剥离测试
-            headers = ["测试编号", "180°剥离平均强度(gf/cm)", "宽度(cm)", "单区间最大荷重(N)",
-                       "单区间最小荷重(N)", "单区间荷重平均值(N)"]
-            col_widths = [4.0, 5.0, 2.5, 4.5, 4.5, 4.5]
-            col_widths = [w * USABLE_WIDTH / sum(col_widths) for w in col_widths]
-
-            num_data_rows = len(all_props)
-            total_rows = 1 + num_data_rows + 3
-            table = doc.add_table(rows=total_rows, cols=len(headers))
-            table.style = 'Table Grid'
-            table.alignment = WD_TABLE_ALIGNMENT.CENTER
-
-            for i, header in enumerate(headers):
-                cell = table.rows[0].cells[i]
-                cell.text = header
-                _set_cell_shading(cell, "1a237e")
-                _set_cell_font(cell, size=Pt(10), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
-                for paragraph in cell.paragraphs:
-                    for run in paragraph.runs:
-                        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-            _set_table_col_widths(table, col_widths)
-
-            for idx, (props, test_id) in enumerate(zip(all_props, test_ids)):
-                width_cm = raw_group_data[test_id].get("width", 0) / 10.0
-                row = table.rows[1 + idx]
-                values = [
-                    test_id,
-                    f"{props['peel_strength_gf_cm']:.3f}",
-                    f"{width_cm:.3f}",
-                    f"{props['max_force_N']:.3f}",
-                    f"{props['min_force_N']:.3f}",
-                    f"{props['avg_force_N']:.3f}"
-                ]
-                for j, val in enumerate(values):
-                    row.cells[j].text = val
-                    _set_cell_font(row.cells[j], size=Pt(10), bold=False, alignment=WD_ALIGN_PARAGRAPH.CENTER)
-                if idx % 2 == 1:
-                    for j in range(len(headers)):
-                        _set_cell_shading(row.cells[j], "f5f5ff")
-
-            stat_rows = [("最大值 Max", np.max), ("最小值 Min", np.min), ("平均值 X-bar", np.mean)]
-            stat_fields = ["peel_strength_gf_cm", "max_force_N", "min_force_N", "avg_force_N"]
-            stat_colors = ["e3f2fd", "fce4ec", "e8f5e9"]
-            for s_idx, (label, func) in enumerate(stat_rows):
-                row = table.rows[1 + num_data_rows + s_idx]
-                row.cells[0].text = label
-                _set_cell_shading(row.cells[0], stat_colors[s_idx])
-                _set_cell_font(row.cells[0], size=Pt(10), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
-                for f_idx, field in enumerate(stat_fields):
-                    vals = [p[field] for p in all_props]
-                    stat_val = func(vals)
-                    row.cells[1 + f_idx].text = f"{stat_val:.3f}"
-                    _set_cell_shading(row.cells[1 + f_idx], stat_colors[s_idx])
-                    _set_cell_font(row.cells[1 + f_idx], size=Pt(10), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
-                width_vals = [raw_group_data[t].get("width", 0) / 10.0 for t in test_ids]
-                row.cells[len(headers) - 2].text = f"{func(width_vals):.3f}"
-                _set_cell_shading(row.cells[len(headers) - 2], stat_colors[s_idx])
-                _set_cell_font(row.cells[len(headers) - 2], size=Pt(10), bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
-
-        doc.add_paragraph()
-        p = doc.add_paragraph()
-        run = p.add_run("测试曲线：")
-        run.bold = True
-        run.font.size = Pt(12)
-        run.font.name = 'Microsoft YaHei'
-        if chart_path and os.path.exists(chart_path):
-            p = doc.add_paragraph()
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            run = p.add_run()
-            run.add_picture(chart_path, width=Cm(24))
-            doc.add_paragraph()
-            p = doc.add_paragraph()
-            p.paragraph_format.space_before = Pt(2)
-            run = p.add_run(f"图表说明：X轴为{x_label}，Y轴为{y_label}")
-            run.font.size = Pt(9)
-            run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
-
-        word_buffer = io.BytesIO()
-        doc.save(word_buffer)
-        word_buffer.seek(0)
-        return word_buffer.getvalue()
-    finally:
-        if chart_path and os.path.exists(chart_path):
-            os.unlink(chart_path)
+    word_buffer = io.BytesIO()
+    doc.save(word_buffer)
+    word_buffer.seek(0)
+    return word_buffer.getvalue()
 
 # ==================== HTML 报告生成 ====================
 def generate_html_report(test_ids, all_props, batch_no, timestamp,
