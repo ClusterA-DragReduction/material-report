@@ -15,13 +15,9 @@ import os
 import json
 import plotly.graph_objects as go
 import plotly.io as pio
-import kaleido
-
-# 确保 Chrome 可用（Streamlit Cloud 上 kaleido 需要）
-try:
-    kaleido.get_chrome_sync()
-except Exception:
-    pass
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 # ==================== 全局配置 ====================
 st.set_page_config(
@@ -573,22 +569,41 @@ def generate_word_report_bytes(selected_groups, x_var, y_var, x_label, y_label,
     """
     custom_colors = dict(custom_colors_tuple)
     chart_path = None
-    has_chart = False
+    palette = ['#1a237e', '#ef5350', '#2e7d32', '#ff8f00', '#6a1b9a',
+               '#00838f', '#d81b60', '#3e2723', '#558b2f', '#01579b']
     try:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
             chart_path = tmp.name
-            fig = plot_plotly_chart(
-                selected_groups, x_var, y_var, "无筛选",
-                0.0, 100.0, 0, 0,
-                x_label, y_label, line_width, color_mode, custom_colors,
-                edited_data
-            )
-            fig.write_image(chart_path, width=1400, height=500, scale=2)
-            has_chart = True
+            plt.figure(figsize=(12, 5))
+            for idx, tid in enumerate(selected_groups):
+                df = edited_data[tid]
+                if x_var not in df.columns or y_var not in df.columns:
+                    continue
+                xv = df[x_var].values
+                yv = df[y_var].values
+                if len(xv) == 0:
+                    continue
+                color = custom_colors.get(tid, palette[idx % len(palette)])
+                plt.plot(xv, yv, color=color, linewidth=max(0.5, line_width * 0.5),
+                         marker='o', markersize=line_width, label=tid)
+            plt.xlabel(x_label, fontsize=11)
+            plt.ylabel(y_label, fontsize=11)
+            plt.title(f"{y_label} - {x_label} 曲线", fontsize=13, color='#1a237e')
+            plt.grid(True, alpha=0.3)
+            plt.legend(fontsize=9)
+            plt.tight_layout()
+            plt.savefig(chart_path, dpi=150, facecolor='white')
+            plt.close()
     except Exception:
-        has_chart = False
+        if chart_path and os.path.exists(chart_path):
+            try:
+                os.unlink(chart_path)
+            except Exception:
+                pass
+        chart_path = None
 
-    doc = Document()
+    try:
+        doc = Document()
         section = doc.sections[0]
         section.page_width = Cm(29.7)
         section.page_height = Cm(21.0)
@@ -772,7 +787,7 @@ def generate_word_report_bytes(selected_groups, x_var, y_var, x_label, y_label,
         run.bold = True
         run.font.size = Pt(12)
         run.font.name = 'Microsoft YaHei'
-        if has_chart:
+        if chart_path and os.path.exists(chart_path):
             p = doc.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             run = p.add_run()
@@ -780,15 +795,9 @@ def generate_word_report_bytes(selected_groups, x_var, y_var, x_label, y_label,
             doc.add_paragraph()
             p = doc.add_paragraph()
             p.paragraph_format.space_before = Pt(2)
-            run = p.add_run(f"图表说明：X轴为{x_label}，Y轴为{y_label}，数据筛选方式：无筛选")
+            run = p.add_run(f"图表说明：X轴为{x_label}，Y轴为{y_label}")
             run.font.size = Pt(9)
             run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
-        else:
-            p = doc.add_paragraph()
-            run = p.add_run("（图表生成失败，请确认 Chrome 已安装）")
-            run.font.size = Pt(9)
-            run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
-            run.italic = True
 
         word_buffer = io.BytesIO()
         doc.save(word_buffer)
