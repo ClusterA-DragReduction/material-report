@@ -1,1 +1,1 @@
-fonts-wqy-microhei
+google-chrome-stable

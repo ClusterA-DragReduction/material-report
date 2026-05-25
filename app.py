@@ -1085,7 +1085,7 @@ if "y_label" not in st.session_state:
 if "filter_method" not in st.session_state:
     st.session_state.filter_method = "无筛选"
 if "line_width" not in st.session_state:
-    st.session_state.line_width = 1.5
+    st.session_state.line_width = 4
 if "color_mode" not in st.session_state:
     st.session_state.color_mode = "自动分配"
 if "tester_name" not in st.session_state:
