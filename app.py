@@ -20,15 +20,40 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 
-# ==================== 字体设置函数（参考 app_0.py） ====================
+# ==================== 字体设置函数 ====================
 def setup_matplotlib_font():
+    """配置 matplotlib 中文字体，跨平台支持。
+    优先尝试平台特定字体，若不可用则扫描系统字体中的 CJK 字体。
+    """
     import platform
+    # 先用 findSystemFonts 强制触发字体扫描，确保 apt 安装的字体被识别
+    _ = fm.findSystemFonts()
+    cjk_keywords = ['wqy', 'wenquan', 'noto.*cjk', 'noto.*sc', 'simhei', 'yahei',
+                    'songti', 'heiti', 'droid.*fall', 'cjk']
+    import re
+    found_cjk = []
+    for fpath in fm.findSystemFonts():
+        fname = fpath.lower()
+        if any(re.search(k, fname) for k in cjk_keywords):
+            try:
+                fp = fm.FontProperties(fname=fpath)
+                found_cjk.append(fp.get_name())
+            except Exception:
+                continue
+    # 平台默认候选字体
     if platform.system() == 'Windows':
-        plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei']
+        candidates = ['Microsoft YaHei', 'SimHei', 'DengXian']
     elif platform.system() == 'Linux':
-        plt.rcParams['font.sans-serif'] = ['WenQuanYi Micro Hei', 'Noto Sans CJK SC']
+        # WenQuanYi 通常名称为 "WenQuanYi Micro Hei"
+        candidates = ['WenQuanYi Micro Hei', 'WenQuanYi Micro Hei Mono',
+                      'Noto Sans CJK SC', 'Noto Sans SC',
+                      'Droid Sans Fallback']
     else:
-        plt.rcParams['font.sans-serif'] = ['STHeiti', 'Arial Unicode MS']
+        candidates = ['STHeiti', 'Arial Unicode MS', 'PingFang SC']
+
+    candidates = list(dict.fromkeys(candidates + found_cjk))
+    plt.rcParams['font.sans-serif'] = candidates
+    plt.rcParams['font.family'] = 'sans-serif'
     plt.rcParams['axes.unicode_minus'] = False
 
 # ==================== 全局配置 ====================
